@@ -575,6 +575,8 @@ export default function App() {
     outgoing: 0,
     missed: 0,
     deletedCount: n.deletedCount,
+    activeCount: n.callCount - n.deletedCount,
+    isActive: n.callCount - n.deletedCount > 0,
     totalDuration: n.totalDuration,
     lastCallTime: n.lastCallTime,
     devices: [],
@@ -808,6 +810,12 @@ export default function App() {
                       <span className="pill outgoing">{c.outgoing} out</span>
                       <span className="pill missed">{c.missed} missed</span>
                       {c.deletedCount > 0 && <span className="pill danger">{c.deletedCount} deleted</span>}
+                      {!c.isActive && c.callCount > 0 && (
+                        <span className="pill muted">Inactive (all deleted)</span>
+                      )}
+                      {c.isActive && c.activeCount > 0 && (
+                        <span className="pill synced">{c.activeCount} active</span>
+                      )}
                       <span className="pill muted">{formatDuration(c.totalDuration)}</span>
                     </div>
                   </button>

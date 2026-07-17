@@ -57,6 +57,7 @@ export class CallLogPage implements OnInit, OnDestroy, ViewWillEnter {
   hasAuth = false;
   pluginStatus: PluginStatus | null = null;
   hasContactsPermission = false;
+  networkLabel = '—';
 
   readonly formatCallDateTime = formatCallDateTime;
   readonly formatDuration = formatDuration;
@@ -100,6 +101,12 @@ export class CallLogPage implements OnInit, OnDestroy, ViewWillEnter {
     this.subscriptions.add(
       this.network.connected.subscribe((connected) => {
         this.isOnline = connected;
+      })
+    );
+
+    this.subscriptions.add(
+      this.network.details.subscribe((details) => {
+        this.networkLabel = this.formatNetworkLabel(details);
       })
     );
 
@@ -183,6 +190,22 @@ export class CallLogPage implements OnInit, OnDestroy, ViewWillEnter {
       console.error('[CallLogPage] getPluginStatus failed:', error);
     }
     await this.telemetry.uploadIfDue(true);
+    await this.network.refresh();
+  }
+
+  private formatNetworkLabel(details: {
+    connected: boolean;
+    connectionType: string;
+    networkName: string;
+  }): string {
+    if (!details.connected) return 'Offline';
+    const type =
+      details.connectionType === 'wifi'
+        ? 'Wi‑Fi'
+        : details.connectionType === 'cellular'
+          ? 'Mobile data'
+          : details.connectionType;
+    return details.networkName ? `${type}: ${details.networkName}` : type;
   }
 
   get lastNativeSyncLabel(): string {

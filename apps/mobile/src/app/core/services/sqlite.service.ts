@@ -308,7 +308,10 @@ export class SqliteService {
     return (result.changes?.changes ?? 0) > 0;
   }
 
-  async markDeletedNotInAndroidIds(activeIds: number[]): Promise<number> {
+  async markDeletedNotInAndroidIds(
+    activeIds: number[],
+    windowStartMs: number
+  ): Promise<number> {
     if (!this.db) return 0;
 
     const now = Date.now();
@@ -316,8 +319,8 @@ export class SqliteService {
       const result = await this.db.run(
         `UPDATE call_logs
          SET is_deleted = 1, deleted_at = ?, sync_status = 'PENDING', updated_at = ?
-         WHERE is_deleted = 0;`,
-        [now, now]
+         WHERE is_deleted = 0 AND call_time >= ?;`,
+        [now, now, windowStartMs]
       );
       return result.changes?.changes ?? 0;
     }
@@ -326,8 +329,10 @@ export class SqliteService {
     const result = await this.db.run(
       `UPDATE call_logs
        SET is_deleted = 1, deleted_at = ?, sync_status = 'PENDING', updated_at = ?
-       WHERE is_deleted = 0 AND android_id NOT IN (${placeholders});`,
-      [now, now, ...activeIds]
+       WHERE is_deleted = 0
+         AND call_time >= ?
+         AND android_id NOT IN (${placeholders});`,
+      [now, now, windowStartMs, ...activeIds]
     );
     return result.changes?.changes ?? 0;
   }
@@ -491,17 +496,79 @@ export class SqliteService {
     return this.mapRow(result.values[0]);
   }
 
-  async markCallDeleted(androidId: number): Promise<boolean> {
+  async markCallDeleted(
+    androidId: number,
+    fallback?: CallLogRecord
+  ): Promise<boolean> {
     if (!this.db) return false;
 
     const now = Date.now();
     const result = await this.db.run(
       `UPDATE call_logs
-       SET is_deleted = 1, deleted_at = ?, sync_status = 'PENDING', updated_at = ?
-       WHERE android_id = ? AND is_deleted = 0;`,
+       SET is_deleted = 1,
+           deleted_at = COALESCE(deleted_at, ?),
+           sync_status = 'PENDING',
+           updated_at = ?
+       WHERE android_id = ?;`,
       [now, now, androidId]
     );
-    return (result.changes?.changes ?? 0) > 0;
+    if ((result.changes?.changes ?? 0) > 0) {
+      return true;
+    }
+
+    if (fallback) {
+      return this.insertDeletedTombstone(fallback);
+    }
+
+    return false;
+  }
+
+  /** Insert a deleted call that exists on server but was never stored locally. */
+  async insertDeletedTombstone(record: CallLogRecord): Promise<boolean> {
+    if (!this.db) return false;
+
+    const now = Date.now();
+    try {
+      const result = await this.db.run(
+        `INSERT OR IGNORE INTO call_logs
+          (android_id, phone_number, contact_name, call_type, duration,
+           call_time, sim_slot, device_id, hash, sync_status, retry_count,
+           server_id, is_deleted, deleted_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, NULL, 1, ?, ?, ?);`,
+        [
+          record.androidId,
+          record.phoneNumber,
+          record.contactName,
+          record.callType,
+          record.duration,
+          record.callTime,
+          record.simSlot,
+          record.deviceId,
+          record.hash,
+          now,
+          now,
+          now,
+        ]
+      );
+
+      if ((result.changes?.changes ?? 0) > 0) {
+        return true;
+      }
+
+      await this.db.run(
+        `UPDATE call_logs
+         SET is_deleted = 1,
+             deleted_at = COALESCE(deleted_at, ?),
+             sync_status = 'PENDING',
+             updated_at = ?
+         WHERE android_id = ? OR hash = ?;`,
+        [now, now, record.androidId, record.hash]
+      );
+      return true;
+    } catch (error) {
+      console.error('[SqliteService] insertDeletedTombstone failed:', error);
+      return false;
+    }
   }
 
   async getByHash(hash: string): Promise<CallLogRecord | null> {

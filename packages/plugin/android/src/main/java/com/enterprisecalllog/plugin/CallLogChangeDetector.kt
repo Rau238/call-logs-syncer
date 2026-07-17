@@ -26,7 +26,7 @@ class CallLogChangeDetector(
     companion object {
         private const val TAG = "CallLogChangeDetector"
         private const val MAX_BATCH = 50
-        private const val DELETION_SCAN_MS = 30_000L
+        private const val DELETION_SCAN_MS = 5_000L
     }
 
     private val handler = Handler(Looper.getMainLooper())

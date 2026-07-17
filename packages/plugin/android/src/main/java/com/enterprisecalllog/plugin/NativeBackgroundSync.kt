@@ -83,8 +83,67 @@ object NativeBackgroundSync {
         return try {
             captureCalls(context)
 
+            val reader = CallLogReader(context, deviceId, null)
             var allSuccess = true
             var uploadedTotal = 0
+            var deletedTotal = 0
+
+            repeat(MAX_BATCHES_PER_RUN) {
+                val unsyncedRemoved = NativeCallCache.getUnsyncedRemovedFromPhone(context, reader)
+                if (unsyncedRemoved.isEmpty()) return@repeat
+
+                val payload = buildPayload(deviceId, unsyncedRemoved, unsyncedRemoved)
+                var success = postBatchSync("$apiUrl/call-log/batch-sync", token, apiKey, payload)
+
+                if (!success && isInvalidApiKey()) {
+                    Log.w(TAG, "Invalid API key — re-registering device")
+                    if (refreshCredentials(context, prefs, apiUrl, deviceId)) {
+                        val newToken = prefs.getString("token", "")!!
+                        val newApiKey = prefs.getString("api_key", "")!!
+                        success = postBatchSync("$apiUrl/call-log/batch-sync", newToken, newApiKey, payload)
+                    }
+                }
+
+                if (success) {
+                    val hashes = unsyncedRemoved.mapNotNull { it.getString("hash", "")?.ifBlank { null } }
+                    val androidIds = unsyncedRemoved.map { it.getLong("androidId") }
+                    NativeCallCache.markSynced(context, hashes)
+                    NativeCallCache.removeEntries(context, androidIds)
+                    uploadedTotal += unsyncedRemoved.size
+                    deletedTotal += unsyncedRemoved.size
+                    Log.d(TAG, "Synced ${unsyncedRemoved.size} offline deleted call(s)")
+                } else {
+                    allSuccess = false
+                    return@repeat
+                }
+            }
+
+            repeat(MAX_BATCHES_PER_RUN) {
+                val removed = NativeCallCache.getSyncedRemovedFromPhone(context, reader)
+                if (removed.isEmpty()) return@repeat
+
+                val deletedIds = removed.map { it.getLong("androidId") }
+                val payload = buildPayload(deviceId, emptyList(), removed)
+                var success = postBatchSync("$apiUrl/call-log/batch-sync", token, apiKey, payload)
+
+                if (!success && isInvalidApiKey()) {
+                    Log.w(TAG, "Invalid API key — re-registering device")
+                    if (refreshCredentials(context, prefs, apiUrl, deviceId)) {
+                        val newToken = prefs.getString("token", "")!!
+                        val newApiKey = prefs.getString("api_key", "")!!
+                        success = postBatchSync("$apiUrl/call-log/batch-sync", newToken, newApiKey, payload)
+                    }
+                }
+
+                if (success) {
+                    NativeCallCache.removeEntries(context, deletedIds)
+                    deletedTotal += deletedIds.size
+                    Log.d(TAG, "Synced ${deletedIds.size} deletions from phone")
+                } else {
+                    allSuccess = false
+                    return@repeat
+                }
+            }
 
             repeat(MAX_BATCHES_PER_RUN) {
                 val batch = NativeCallCache.getUnsynced(context, 50)
@@ -93,7 +152,7 @@ object NativeBackgroundSync {
                 val payload = buildPayload(deviceId, batch, emptyList())
                 var success = postBatchSync("$apiUrl/call-log/batch-sync", token, apiKey, payload)
 
-                if (!success && isInvalidApiKey(prefs)) {
+                if (!success && isInvalidApiKey()) {
                     Log.w(TAG, "Invalid API key — re-registering device")
                     if (refreshCredentials(context, prefs, apiUrl, deviceId)) {
                         val newToken = prefs.getString("token", "")!!
@@ -112,11 +171,11 @@ object NativeBackgroundSync {
                 }
             }
 
-            if (uploadedTotal > 0) {
+            if (uploadedTotal > 0 || deletedTotal > 0) {
                 prefs.edit().putLong("last_native_sync_at", System.currentTimeMillis()).apply()
-                Log.d(TAG, "Silent sync: uploaded $uploadedTotal calls")
+                Log.d(TAG, "Silent sync: uploaded $uploadedTotal calls, $deletedTotal deletions")
             } else {
-                Log.d(TAG, "No pending calls to sync")
+                Log.d(TAG, "No pending calls or deletions to sync")
             }
 
             allSuccess
@@ -129,7 +188,7 @@ object NativeBackgroundSync {
     private fun buildPayload(
         deviceId: String,
         calls: List<com.getcapacitor.JSObject>,
-        deletedIds: List<Long>
+        deletions: List<com.getcapacitor.JSObject>
     ): String {
         val root = JSONObject()
         root.put("deviceId", deviceId)
@@ -150,9 +209,13 @@ object NativeBackgroundSync {
         root.put("calls", callsArray)
 
         val deletionsArray = JSONArray()
-        for (id in deletedIds) {
+        for (del in deletions) {
             val obj = JSONObject()
-            obj.put("androidId", id)
+            obj.put("androidId", del.getLong("androidId"))
+            val hash = del.getString("hash", "")
+            if (!hash.isNullOrBlank()) {
+                obj.put("hash", hash)
+            }
             deletionsArray.put(obj)
         }
         root.put("deletions", deletionsArray)
@@ -200,7 +263,7 @@ object NativeBackgroundSync {
 
     private var lastAuthError: String? = null
 
-    private fun isInvalidApiKey(prefs: android.content.SharedPreferences): Boolean {
+    private fun isInvalidApiKey(): Boolean {
         return lastAuthError?.contains("Invalid or inactive device API key") == true
     }
 

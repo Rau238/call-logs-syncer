@@ -145,7 +145,7 @@ export class CallLogPluginService implements OnDestroy {
     const bgSyncHandle = await CallLogSync.addListener(
       'backgroundSync',
       async () => {
-        await this.importDeviceCalls();
+        await this.importDeviceCalls(500, true);
         await this.syncService.syncPending();
         await CallLogSync.clearBackgroundSyncPending();
       }
@@ -158,7 +158,7 @@ export class CallLogPluginService implements OnDestroy {
     await App.addListener('appStateChange', async ({ isActive }) => {
       if (!isActive) return;
 
-      await this.importDeviceCalls();
+      await this.importDeviceCalls(500, true);
       await this.syncService.syncPending();
       await this.telemetry.uploadIfDue(true);
       const pending = await CallLogSync.isBackgroundSyncPending();

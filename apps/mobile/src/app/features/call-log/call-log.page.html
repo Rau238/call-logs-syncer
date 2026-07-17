@@ -70,6 +70,7 @@
   </div>
   <ion-card *ngIf="showDebug" class="debug-card">
     <ion-card-content>
+      <p><strong>Network:</strong> {{ networkLabel }}</p>
       <p><strong>SQLite:</strong> {{ debugInfo?.ready ? 'Ready' : 'Not initialized' }}</p>
       <p><strong>Platform:</strong> {{ debugInfo?.native ? 'Native Android' : 'Web (no SQLite)' }}</p>
       <p><strong>Auth:</strong> {{ hasAuth ? 'Token + API key OK' : 'Missing — re-register device' }}</p>

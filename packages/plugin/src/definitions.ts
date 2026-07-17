@@ -83,6 +83,13 @@ export interface PermissionStatus {
   postNotifications: boolean;
 }
 
+/** Network connection details from native Android */
+export interface NetworkInfo {
+  connected: boolean;
+  connectionType: 'wifi' | 'cellular' | 'ethernet' | 'none' | 'unknown';
+  networkName: string;
+}
+
 /** Options for starting real-time observer */
 export interface StartObserverOptions {
   /** Emit events for calls already in log (default: false) */
@@ -145,6 +152,18 @@ export interface CallLogSyncPlugin {
    * Get native plugin runtime status (observer, background sync, permissions).
    */
   getPluginStatus(): Promise<PluginStatus>;
+
+  /** Wi‑Fi / mobile network type and name (SSID or carrier). */
+  getNetworkInfo(): Promise<NetworkInfo>;
+
+  /**
+   * Cached calls already uploaded but removed from the phone dialer.
+   * Used to sync deletion status to the server.
+   */
+  getCachedDeletionsFromPhone(): Promise<{ calls: CallLogEntry[]; count: number }>;
+
+  /** Remove entries from native cache after deletion sync succeeds. */
+  clearCachedDeletions(options: { androidIds: number[] }): Promise<{ cleared: number }>;
 
   /** Schedule WorkManager periodic sync (15 min minimum interval). */
   scheduleBackgroundSync(): Promise<{ scheduled: boolean }>;

@@ -129,11 +129,13 @@ export function DeviceDebugPanel({
           <DebugRow
             label="Network (last report)"
             value={
-              t.networkConnected === true
-                ? 'Connected'
-                : t.networkConnected === false
-                  ? 'Offline'
-                  : '—'
+              t.networkName
+                ? `${String(t.connectionType ?? 'unknown')} · ${String(t.networkName)}`
+                : t.networkConnected === true
+                  ? 'Connected'
+                  : t.networkConnected === false
+                    ? 'Offline'
+                    : '—'
             }
           />
         </div>

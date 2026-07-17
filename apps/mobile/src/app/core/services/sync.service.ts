@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
-import { CallLogEntry } from 'call-log-sync';
+import { Capacitor } from '@capacitor/core';
+import { CallLogEntry, CallLogSync } from 'call-log-sync';
 
 import {
   CallLogRecord,
@@ -81,14 +82,10 @@ export class SyncService {
       await this.upsertCallFromNative(cachedCall, false);
     }
 
-    const existing = await this.sqlite.getByAndroidId(androidId);
-    if (!existing?.id) return;
-
-    if (existing.syncStatus === 'SYNCED') {
-      return;
-    }
-
-    await this.sqlite.markPending([existing.id]);
+    await this.sqlite.markCallDeleted(
+      androidId,
+      cachedCall ? toCallLogRecord(cachedCall) : undefined
+    );
     await this.refreshCounts();
     if (this.network.isConnected()) {
       this.syncPending().catch(console.error);
@@ -148,6 +145,11 @@ export class SyncService {
 
     const activeIds = recentCalls.map((c) => c.androidId);
     const windowStart = getSyncWindowStartMs();
+    const deletedMarked = await this.sqlite.markDeletedNotInAndroidIds(
+      activeIds,
+      windowStart
+    );
+    const cachedDeleted = await this.importCachedDeletions(activeIds);
     const preserved = await this.sqlite.ensurePreservedForMissingFromPhone(
       activeIds,
       windowStart
@@ -155,11 +157,37 @@ export class SyncService {
 
     await this.refreshCounts();
     const pending = await this.sqlite.getPendingCount(windowStart);
-    if (pending > 0 && this.network.isConnected()) {
+    if ((pending > 0 || deletedMarked > 0 || cachedDeleted > 0) && this.network.isConnected()) {
       this.syncPending().catch(console.error);
     }
 
-    return changed + preserved;
+    return changed + preserved + deletedMarked + cachedDeleted;
+  }
+
+  /** Queue deletions from native cache (calls uploaded in background, then removed from phone). */
+  async importCachedDeletions(activeIds: number[]): Promise<number> {
+    if (!Capacitor.isNativePlatform()) return 0;
+
+    try {
+      const { calls } = await CallLogSync.getCachedDeletionsFromPhone();
+      if (!calls.length) return 0;
+
+      const activeSet = new Set(activeIds);
+      let marked = 0;
+
+      for (const entry of calls) {
+        if (activeSet.has(entry.androidId)) continue;
+
+        const record = toCallLogRecord(entry);
+        const ok = await this.sqlite.markCallDeleted(entry.androidId, record);
+        if (ok) marked++;
+      }
+
+      return marked;
+    } catch (error) {
+      console.warn('[SyncService] importCachedDeletions failed:', error);
+      return 0;
+    }
   }
 
   async syncPending(allowCredentialRefresh = true): Promise<SyncBatchResult> {
@@ -189,6 +217,8 @@ export class SyncService {
       errors: [],
     };
 
+    let deletionsConfirmed = 0;
+
     try {
       const windowStart = getSyncWindowStartMs();
       const pending = await this.sqlite.getPendingCalls(BATCH_SIZE, windowStart);
@@ -205,6 +235,10 @@ export class SyncService {
 
       const deviceId = this.auth.getDeviceId() ?? eligible[0].deviceId;
       const newCalls = eligible.filter((r) => !r.isDeleted);
+      const deletedCalls = eligible.filter((r) => r.isDeleted);
+      /** Deleted locally but never on server — must insert then delete in one batch. */
+      const deletedNeedingUpsert = deletedCalls.filter((r) => !r.serverId);
+      const callsToUpload = [...newCalls, ...deletedNeedingUpsert];
 
       if (!deviceId) {
         await this.sqlite.markPending(ids);
@@ -212,20 +246,30 @@ export class SyncService {
         return result;
       }
 
+      const toCallPayload = (r: CallLogRecord) => ({
+        hash: r.hash,
+        androidId: r.androidId,
+        phoneNumber: r.phoneNumber,
+        contactName: r.contactName,
+        callType: r.callType,
+        duration: r.duration,
+        callTime: r.callTime,
+        simSlot: r.simSlot,
+      });
+
       const payload = {
         deviceId,
-        calls: newCalls.map((r) => ({
+        calls: callsToUpload.map(toCallPayload),
+        deletions: deletedCalls.map((r) => ({
           hash: r.hash,
           androidId: r.androidId,
-          phoneNumber: r.phoneNumber,
-          contactName: r.contactName,
-          callType: r.callType,
-          duration: r.duration,
-          callTime: r.callTime,
-          simSlot: r.simSlot,
         })),
-        deletions: [],
       };
+
+      if (payload.calls.length === 0 && payload.deletions.length === 0) {
+        await this.sqlite.markPending(ids);
+        return result;
+      }
 
       try {
         const response = await this.api.batchSync(token, apiKey, payload);
@@ -234,7 +278,7 @@ export class SyncService {
         const serverIdMap = new Map<number, string>();
 
         for (const synced of response.synced) {
-          const record = newCalls.find((r) => r.hash === synced.hash);
+          const record = callsToUpload.find((r) => r.hash === synced.hash);
           if (record?.id) {
             syncedIds.push(record.id);
             serverIdMap.set(record.id, synced.serverId);
@@ -242,17 +286,59 @@ export class SyncService {
         }
 
         for (const dupHash of response.duplicates ?? []) {
-          const record = newCalls.find((r) => r.hash === dupHash);
+          const record = callsToUpload.find((r) => r.hash === dupHash);
           if (record?.id) syncedIds.push(record.id);
         }
 
-        await this.sqlite.markSynced(syncedIds, serverIdMap);
-        result.synced = syncedIds.length;
-        result.duplicates = response.duplicates?.length ?? 0;
+        const isDeletedLocal = (id: number): boolean =>
+          eligible.find((r) => r.id === id)?.isDeleted ?? false;
+
+        const activeSyncedIds = syncedIds.filter((id) => !isDeletedLocal(id));
+        const activeDuplicateIds = (response.duplicates ?? [])
+          .map((hash) => callsToUpload.find((r) => r.hash === hash)?.id)
+          .filter((id): id is number => id != null && !isDeletedLocal(id));
+
+        if (activeSyncedIds.length > 0 || activeDuplicateIds.length > 0) {
+          await this.sqlite.markSynced(
+            [...new Set([...activeSyncedIds, ...activeDuplicateIds])],
+            serverIdMap
+          );
+        }
+
+        result.synced = activeSyncedIds.length;
+        result.duplicates = activeDuplicateIds.length;
+
+        const deletedSyncedIds: number[] = [];
+        for (const del of response.deleted ?? []) {
+          const record = deletedCalls.find(
+            (r) => r.hash === del.hash || r.androidId === del.androidId
+          );
+          if (record?.id) deletedSyncedIds.push(record.id);
+        }
+        if (deletedSyncedIds.length > 0) {
+          deletionsConfirmed = deletedSyncedIds.length;
+          await this.sqlite.markSynced(deletedSyncedIds, new Map());
+          if (Capacitor.isNativePlatform()) {
+            const androidIds = deletedCalls
+              .filter((r) => r.id != null && deletedSyncedIds.includes(r.id))
+              .map((r) => r.androidId);
+            if (androidIds.length > 0) {
+              await CallLogSync.clearCachedDeletions({ androidIds }).catch(console.error);
+            }
+          }
+        }
 
         const failedHashes = new Set((response.failed ?? []).map((f) => f.hash));
-        const failedIds = newCalls
+        const failedIds = callsToUpload
           .filter((r) => failedHashes.has(r.hash))
+          .map((r) => r.id!)
+          .filter(Boolean);
+
+        const deleteFailedIds = new Set(
+          (response.deleteFailed ?? []).map((f) => f.androidId)
+        );
+        const failedDeletionIds = deletedCalls
+          .filter((r) => deleteFailedIds.has(r.androidId))
           .map((r) => r.id!)
           .filter(Boolean);
 
@@ -262,15 +348,37 @@ export class SyncService {
           result.errors.push(...(response.failed ?? []).map((f) => f.reason));
         }
 
-        const processedIds = new Set([...syncedIds, ...failedIds]);
+        if (failedDeletionIds.length > 0) {
+          await this.sqlite.markFailed(failedDeletionIds);
+          result.failed += failedDeletionIds.length;
+          result.errors.push(
+            ...(response.deleteFailed ?? []).map((f) => f.reason)
+          );
+        }
+
+        const processedIds = new Set([
+          ...syncedIds,
+          ...failedIds,
+          ...deletedSyncedIds,
+          ...failedDeletionIds,
+        ]);
         const unprocessed = eligible.filter((r) => !processedIds.has(r.id!));
-        if (unprocessed.length > 0) {
-          // Treat unprocessed as synced duplicates — API may omit some duplicate hashes.
+        const unprocessedNew = unprocessed.filter((r) => !r.isDeleted);
+        const unprocessedDeleted = unprocessed.filter((r) => r.isDeleted);
+
+        if (unprocessedNew.length > 0) {
           await this.sqlite.markSynced(
-            unprocessed.map((r) => r.id!),
+            unprocessedNew.map((r) => r.id!),
             new Map()
           );
-          result.duplicates += unprocessed.length;
+          result.duplicates += unprocessedNew.length;
+        }
+
+        if (unprocessedDeleted.length > 0) {
+          await this.sqlite.markPending(unprocessedDeleted.map((r) => r.id!));
+          result.errors.push(
+            `${unprocessedDeleted.length} deletion(s) not confirmed by server — will retry`
+          );
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -304,7 +412,8 @@ export class SyncService {
 
       this.lastSyncAt = Date.now();
 
-      if (result.synced > 0 && (await this.sqlite.getPendingCount(getSyncWindowStartMs())) > 0) {
+      const pendingAfter = await this.sqlite.getPendingCount(getSyncWindowStartMs());
+      if (pendingAfter > 0 && (result.synced > 0 || deletionsConfirmed > 0)) {
         await this.syncPending();
       }
     } finally {

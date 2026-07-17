@@ -1,6 +1,7 @@
 import { WebPlugin } from '@capacitor/core';
 
 import type {
+  CallLogEntry,
   CallLogSyncPlugin,
   PermissionStatus,
   PluginStatus,
@@ -65,6 +66,22 @@ export class CallLogSyncWeb extends WebPlugin implements CallLogSyncPlugin {
       deviceId: 'web-stub-device-id',
       permissions,
     };
+  }
+
+  async getNetworkInfo() {
+    return {
+      connected: typeof navigator !== 'undefined' ? navigator.onLine : false,
+      connectionType: 'unknown' as const,
+      networkName: 'Web',
+    };
+  }
+
+  async getCachedDeletionsFromPhone(): Promise<{ calls: CallLogEntry[]; count: number }> {
+    return { calls: [], count: 0 };
+  }
+
+  async clearCachedDeletions(_options: { androidIds: number[] }): Promise<{ cleared: number }> {
+    return { cleared: 0 };
   }
 
   async scheduleBackgroundSync(): Promise<{ scheduled: boolean }> {

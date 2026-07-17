@@ -78,6 +78,8 @@ export interface ContactGroup {
   outgoing: number;
   missed: number;
   deletedCount: number;
+  activeCount: number;
+  isActive: boolean;
   totalDuration: number;
   lastCallTime: number;
   devices: string[];

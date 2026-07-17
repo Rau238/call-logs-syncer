@@ -219,6 +219,57 @@ class CallLogSyncPlugin : Plugin() {
     }
 
     @PluginMethod
+    fun getNetworkInfo(call: PluginCall) {
+        call.resolve(NetworkInfoHelper.read(context))
+    }
+
+    /**
+     * Returns cached calls that were already uploaded but removed from the phone dialer.
+     */
+    @PluginMethod
+    fun getCachedDeletionsFromPhone(call: PluginCall) {
+        if (!isPermissionGranted(Manifest.permission.READ_CALL_LOG)) {
+            call.reject("READ_CALL_LOG permission not granted", "PERMISSION_DENIED")
+            return
+        }
+
+        Thread {
+            try {
+                val reader = createReader()
+                val removed = NativeCallCache.getCachedRemovedFromPhone(context, reader)
+                val result = JSObject()
+                result.put("calls", removed)
+                result.put("count", removed.size)
+                call.resolve(result)
+            } catch (e: Exception) {
+                call.reject("Failed to read cached deletions: ${e.message}", "READ_ERROR", e)
+            }
+        }.start()
+    }
+
+    @PluginMethod
+    fun clearCachedDeletions(call: PluginCall) {
+        val androidIds = call.getArray("androidIds") ?: run {
+            call.reject("androidIds array is required", "INVALID_ARGUMENT")
+            return
+        }
+
+        val ids = mutableListOf<Long>()
+        for (i in 0 until androidIds.length()) {
+            val value = androidIds.opt(i)
+            when (value) {
+                is Number -> ids.add(value.toLong())
+                is String -> value.toLongOrNull()?.let { ids.add(it) }
+            }
+        }
+
+        NativeCallCache.removeEntries(context, ids)
+        val result = JSObject()
+        result.put("cleared", ids.size)
+        call.resolve(result)
+    }
+
+    @PluginMethod
     fun scheduleBackgroundSync(call: PluginCall) {
         CallLogSyncWorker.schedule(context)
         val result = JSObject()

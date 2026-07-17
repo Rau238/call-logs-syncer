@@ -169,6 +169,11 @@ export class CallLogService {
               hash: row.hash,
               androidId: Number(row.android_id),
             });
+          } else {
+            result.deleteFailed.push({
+              androidId: deletion.androidId,
+              reason: 'Call not found on server for this device',
+            });
           }
 
           await client.query(`RELEASE SAVEPOINT ${savepoint}`);
@@ -715,6 +720,8 @@ export class CallLogService {
       outgoing: number;
       missed: number;
       deletedCount: number;
+      activeCount: number;
+      isActive: boolean;
       totalDuration: number;
       lastCallTime: number;
       devices: string[];
@@ -749,6 +756,7 @@ export class CallLogService {
       outgoing: string;
       missed: string;
       deleted_count: string;
+      active_count: string;
       total_duration: string;
       last_call_time: string;
       devices: string[];
@@ -760,6 +768,7 @@ export class CallLogService {
               COUNT(*) FILTER (WHERE call_type = 'OUTGOING')::int AS outgoing,
               COUNT(*) FILTER (WHERE call_type = 'MISSED')::int AS missed,
               COUNT(*) FILTER (WHERE is_deleted)::int AS deleted_count,
+              COUNT(*) FILTER (WHERE NOT is_deleted)::int AS active_count,
               COALESCE(SUM(duration), 0)::int AS total_duration,
               MAX(call_time)::bigint AS last_call_time,
               ARRAY_AGG(DISTINCT device_id) AS devices
@@ -780,6 +789,8 @@ export class CallLogService {
         outgoing: Number(r.outgoing),
         missed: Number(r.missed),
         deletedCount: Number(r.deleted_count),
+        activeCount: Number(r.active_count),
+        isActive: Number(r.active_count) > 0,
         totalDuration: Number(r.total_duration),
         lastCallTime: Number(r.last_call_time),
         devices: r.devices ?? [],

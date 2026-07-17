@@ -37,10 +37,10 @@ export class AppInitializerService {
     await this.sync.prepareForSync();
 
     await this.ensurePermissionsAndMonitoring();
-    await this.plugin.importDeviceCalls();
+    await this.plugin.importDeviceCalls(500, true);
 
     await this.network.initialize(() => {
-      this.plugin.importDeviceCalls().then(() => {
+      this.plugin.importDeviceCalls(500, true).then(() => {
         this.sync.syncPending().catch(console.error);
       });
     });

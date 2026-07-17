@@ -44,11 +44,12 @@ export class TelemetryService {
     }
 
     try {
-      const [permissions, pluginStatus, sqliteDebug, appInfo] = await Promise.all([
+      const [permissions, pluginStatus, sqliteDebug, appInfo, network] = await Promise.all([
         CallLogSync.checkPermissions(),
         CallLogSync.getPluginStatus(),
         this.sqlite.getDebugInfo(),
         App.getInfo().catch(() => ({ version: 'unknown', build: '' })),
+        this.network.refresh(),
       ]);
 
       await this.api.reportDeviceTelemetry(token, apiKey, {
@@ -66,7 +67,9 @@ export class TelemetryService {
         apiUrl: this.api.getApiUrl(),
         appVersion: appInfo.version,
         osVersion: Capacitor.getPlatform() === 'android' ? `Android` : Capacitor.getPlatform(),
-        networkConnected: this.network.isConnected(),
+        networkConnected: network.connected,
+        connectionType: network.connectionType,
+        networkName: network.networkName,
         platform: Capacitor.getPlatform(),
         reportedAt: new Date().toISOString(),
       });

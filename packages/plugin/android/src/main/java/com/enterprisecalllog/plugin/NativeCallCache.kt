@@ -61,6 +61,67 @@ object NativeCallCache {
         saveSyncedHashes(context, synced)
     }
 
+    /**
+     * Cached calls (synced or not) that are no longer on the phone dialer.
+     */
+    fun getCachedRemovedFromPhone(context: Context, reader: CallLogReader): List<JSObject> {
+        val since = SyncConfig.syncWindowStartMs()
+        val onPhone = reader.read(limit = 500, offset = 0, since = since).calls
+            .map { it.getLong("androidId") }
+            .toSet()
+
+        return loadMap(context).values
+            .asSequence()
+            .filter { it.optLong("callTime") >= since }
+            .filter { it.optLong("androidId") !in onPhone }
+            .sortedByDescending { it.optLong("callTime") }
+            .map { jsonToJsObject(it) }
+            .toList()
+    }
+
+    /** Previously uploaded calls removed from the phone — deletion-only sync. */
+    fun getSyncedRemovedFromPhone(context: Context, reader: CallLogReader): List<JSObject> {
+        val since = SyncConfig.syncWindowStartMs()
+        val onPhone = reader.read(limit = 500, offset = 0, since = since).calls
+            .map { it.getLong("androidId") }
+            .toSet()
+        val synced = getSyncedHashes(context)
+
+        return loadMap(context).values
+            .asSequence()
+            .filter { it.optLong("callTime") >= since }
+            .filter {
+                val hash = it.optString("hash", "")
+                hash.isNotBlank() && hash in synced
+            }
+            .filter { it.optLong("androidId") !in onPhone }
+            .sortedByDescending { it.optLong("callTime") }
+            .map { jsonToJsObject(it) }
+            .toList()
+    }
+
+    /**
+     * Cached calls never uploaded that were removed from the phone while offline.
+     * Requires insert + delete in the same batch.
+     */
+    fun getUnsyncedRemovedFromPhone(context: Context, reader: CallLogReader): List<JSObject> {
+        val synced = getSyncedHashes(context)
+        return getCachedRemovedFromPhone(context, reader).filter {
+            val hash = it.getString("hash", "") ?: ""
+            hash.isBlank() || hash !in synced
+        }
+    }
+
+    fun removeEntries(context: Context, androidIds: Collection<Long>) {
+        if (androidIds.isEmpty()) return
+        val map = loadMap(context)
+        var changed = false
+        for (id in androidIds) {
+            if (map.remove(id) != null) changed = true
+        }
+        if (changed) pruneAndSave(context, map)
+    }
+
     fun cachedCount(context: Context): Int = loadMap(context).size
 
     private fun loadMap(context: Context): MutableMap<Long, JSONObject> {
