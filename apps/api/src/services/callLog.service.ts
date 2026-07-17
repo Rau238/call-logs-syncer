@@ -1,6 +1,6 @@
 import { PoolClient } from 'pg';
-import { query, withTransaction } from '../config/database';
-import { generateServerUuid } from '../utils/crypto';
+import { query, withTransaction, parseJsonObject } from '../config/database';
+import { generateServerUuid, generateCallHash } from '../utils/crypto';
 import { logger } from '../utils/logger';
 
 export interface CallLogInput {
@@ -426,6 +426,173 @@ export class CallLogService {
     return { deleted: result.length, notFound };
   }
 
+  async updateCallLog(
+    serverId: string,
+    patch: {
+      contactName?: string;
+      phoneNumber?: string;
+      callType?: string;
+      duration?: number;
+      callTime?: number;
+      simSlot?: number;
+      isDeleted?: boolean;
+    }
+  ): Promise<{ updated: boolean; serverId: string }> {
+    const rows = await query<{
+      device_id: string;
+      phone_number: string;
+      contact_name: string;
+      call_type: string;
+      duration: number;
+      call_time: number;
+      sim_slot: number;
+      hash: string;
+      is_deleted: boolean;
+    }>(
+      `SELECT device_id, phone_number, contact_name, call_type, duration,
+              call_time, sim_slot, hash, COALESCE(is_deleted, FALSE) AS is_deleted
+       FROM call_logs WHERE server_uuid = $1 LIMIT 1`,
+      [serverId]
+    );
+
+    if (!rows.length) return { updated: false, serverId };
+
+    const row = rows[0];
+    const phoneNumber = patch.phoneNumber ?? row.phone_number;
+    const contactName = patch.contactName ?? row.contact_name;
+    const callType = patch.callType ?? row.call_type;
+    const duration = patch.duration ?? row.duration;
+    const callTime = patch.callTime ?? Number(row.call_time);
+    const simSlot = patch.simSlot ?? row.sim_slot;
+    const isDeleted = patch.isDeleted ?? row.is_deleted;
+    const newHash = generateCallHash(
+      row.device_id,
+      phoneNumber,
+      callTime,
+      duration,
+      callType
+    );
+
+    if (newHash !== row.hash) {
+      const conflict = await query<{ server_uuid: string }>(
+        `SELECT server_uuid FROM call_logs WHERE hash = $1 AND server_uuid != $2 LIMIT 1`,
+        [newHash, serverId]
+      );
+      if (conflict.length) {
+        throw new Error('Update would duplicate an existing call hash');
+      }
+    }
+
+    await query(
+      `UPDATE call_logs
+       SET phone_number = $2, contact_name = $3, call_type = $4, duration = $5,
+           call_time = $6, sim_slot = $7, hash = $8,
+           is_deleted = $9,
+           deleted_at = CASE WHEN $9 THEN COALESCE(deleted_at, NOW()) ELSE NULL END,
+           updated_at = NOW()
+       WHERE server_uuid = $1`,
+      [
+        serverId,
+        phoneNumber,
+        contactName,
+        callType,
+        duration,
+        callTime,
+        simSlot,
+        newHash,
+        isDeleted,
+      ]
+    );
+
+    return { updated: true, serverId };
+  }
+
+  async updateContactName(phoneNumber: string, contactName: string): Promise<number> {
+    const result = await query<{ server_uuid: string }>(
+      `UPDATE call_logs SET contact_name = $2, updated_at = NOW()
+       WHERE phone_number = $1 RETURNING server_uuid`,
+      [phoneNumber, contactName]
+    );
+    return result.length;
+  }
+
+  async deleteCallsByPhone(phoneNumber: string): Promise<number> {
+    const result = await query<{ server_uuid: string }>(
+      `DELETE FROM call_logs WHERE phone_number = $1 RETURNING server_uuid`,
+      [phoneNumber]
+    );
+    return result.length;
+  }
+
+  async updateDevice(
+    deviceId: string,
+    patch: { deviceName?: string; isActive?: boolean }
+  ): Promise<boolean> {
+    const sets: string[] = ['updated_at = NOW()'];
+    const params: unknown[] = [deviceId];
+    let idx = 2;
+
+    if (patch.deviceName !== undefined) {
+      sets.push(`device_name = $${idx++}`);
+      params.push(patch.deviceName);
+    }
+    if (patch.isActive !== undefined) {
+      sets.push(`is_active = $${idx++}`);
+      params.push(patch.isActive);
+    }
+
+    if (sets.length === 1) return false;
+
+    const result = await query<{ device_id: string }>(
+      `UPDATE devices SET ${sets.join(', ')} WHERE device_id = $1 RETURNING device_id`,
+      params
+    );
+    return result.length > 0;
+  }
+
+  async deleteDevice(deviceId: string): Promise<boolean> {
+    const result = await query<{ device_id: string }>(
+      `DELETE FROM devices WHERE device_id = $1 RETURNING device_id`,
+      [deviceId]
+    );
+    return result.length > 0;
+  }
+
+  async deleteManyDevices(deviceIds: string[]): Promise<{
+    deleted: number;
+    notFound: string[];
+  }> {
+    if (deviceIds.length === 0) return { deleted: 0, notFound: [] };
+
+    const result = await query<{ device_id: string }>(
+      `DELETE FROM devices WHERE device_id = ANY($1::varchar[]) RETURNING device_id`,
+      [deviceIds]
+    );
+
+    const deletedIds = new Set(result.map((r) => r.device_id));
+    return {
+      deleted: result.length,
+      notFound: deviceIds.filter((id) => !deletedIds.has(id)),
+    };
+  }
+
+  async deleteSyncAuditEntry(id: number): Promise<boolean> {
+    const result = await query<{ id: number }>(
+      `DELETE FROM sync_audit WHERE id = $1 RETURNING id`,
+      [id]
+    );
+    return result.length > 0;
+  }
+
+  async deleteManySyncAudit(ids: number[]): Promise<{ deleted: number }> {
+    if (ids.length === 0) return { deleted: 0 };
+    const result = await query<{ id: number }>(
+      `DELETE FROM sync_audit WHERE id = ANY($1::int[]) RETURNING id`,
+      [ids]
+    );
+    return { deleted: result.length };
+  }
+
   async getAnalytics(): Promise<{
     callsByType: Array<{ callType: string; count: number }>;
     callsByDay: Array<{ date: string; count: number; deleted: number }>;
@@ -695,7 +862,20 @@ export class CallLogService {
   async saveDeviceTelemetry(
     deviceId: string,
     telemetry: Record<string, unknown>
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const existing = await query<{ telemetry: unknown }>(
+      `SELECT COALESCE(telemetry, '{}'::jsonb) AS telemetry FROM devices WHERE device_id = $1 LIMIT 1`,
+      [deviceId]
+    );
+
+    if (!existing.length) return false;
+
+    const merged = {
+      ...parseJsonObject(existing[0].telemetry),
+      ...telemetry,
+      reportedAt: telemetry.reportedAt ?? new Date().toISOString(),
+    };
+
     await query(
       `UPDATE devices
        SET telemetry = $2::jsonb,
@@ -703,8 +883,10 @@ export class CallLogService {
            last_seen_at = NOW(),
            updated_at = NOW()
        WHERE device_id = $1`,
-      [deviceId, JSON.stringify(telemetry)]
+      [deviceId, JSON.stringify(merged)]
     );
+
+    return true;
   }
 
   async getDeviceDetail(deviceId: string): Promise<{
@@ -766,13 +948,29 @@ export class CallLogService {
         is_active: d.is_active,
         last_seen_at: d.last_seen_at,
         telemetry_at: d.telemetry_at,
-        telemetry: d.telemetry ?? {},
+        telemetry: parseJsonObject(d.telemetry),
         call_count: Number(d.call_count),
         deleted_count: Number(d.deleted_count),
         active_count: Number(d.active_count),
       },
       recentCalls,
     };
+  }
+
+  /** Changes only when call logs or device count change — not on every device heartbeat. */
+  async getDataRevision(since?: string): Promise<{ revision: string; changed: boolean }> {
+    const rows = await query<{ fingerprint: string }>(
+      `SELECT md5(
+         CONCAT_WS('|',
+           (SELECT COUNT(*)::text FROM call_logs),
+           (SELECT COALESCE(MAX(id), 0)::text FROM call_logs),
+           (SELECT COUNT(*) FILTER (WHERE is_deleted)::text FROM call_logs),
+           (SELECT COUNT(*)::text FROM devices)
+         )
+       ) AS fingerprint`
+    );
+    const revision = rows[0]?.fingerprint ?? '';
+    return { revision, changed: !since || since !== revision };
   }
 
   async getLiveSnapshot(): Promise<{

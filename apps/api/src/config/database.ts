@@ -1,6 +1,24 @@
 import { Pool, PoolClient, QueryResultRow } from 'pg';
 import { config } from '../config';
 
+function parseJsonObject(raw: unknown): Record<string, unknown> {
+  if (raw == null) return {};
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  return {};
+}
+
 let pool: Pool | null = null;
 
 export function getPool(): Pool {
@@ -70,3 +88,5 @@ export async function closePool(): Promise<void> {
     pool = null;
   }
 }
+
+export { parseJsonObject };

@@ -51,6 +51,10 @@ export class ApiService {
 
   constructor(private http: HttpClient) {}
 
+  getApiUrl(): string {
+    return this.baseUrl;
+  }
+
   private defaultHeaders(): HttpHeaders {
     return new HttpHeaders({
       'Content-Type': 'application/json',

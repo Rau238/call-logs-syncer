@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
+import { parseJsonObject } from '../config/database';
 import { CallLogService } from '../services/callLog.service';
 
 const callLogService = new CallLogService();
@@ -26,6 +27,13 @@ export async function getLiveSnapshot(
 ): Promise<void> {
   const snapshot = await callLogService.getLiveSnapshot();
   res.json(snapshot);
+}
+
+export async function getDataRevision(req: AuthRequest, res: Response): Promise<void> {
+  const since = req.query.since as string | undefined;
+  const result = await callLogService.getDataRevision(since);
+  res.set('Cache-Control', 'no-store');
+  res.json(result);
 }
 
 export async function getAllCallLogs(req: AuthRequest, res: Response): Promise<void> {
@@ -73,7 +81,7 @@ export async function getAllDevices(
       is_active: d.is_active,
       last_seen_at: d.last_seen_at,
       telemetry_at: d.telemetry_at,
-      telemetry: d.telemetry ?? {},
+      telemetry: parseJsonObject(d.telemetry),
       call_count: d.call_count,
       deleted_count: d.deleted_count,
     })),
@@ -91,9 +99,15 @@ export async function getDeviceDetail(req: AuthRequest, res: Response): Promise<
 
   res.json({
     device: {
-      ...detail.device,
+      device_id: detail.device.device_id,
+      device_name: detail.device.device_name,
+      is_active: detail.device.is_active,
       last_seen_at: detail.device.last_seen_at,
       telemetry_at: detail.device.telemetry_at,
+      telemetry: detail.device.telemetry ?? {},
+      call_count: detail.device.call_count,
+      deleted_count: detail.device.deleted_count,
+      active_count: detail.device.active_count,
     },
     recentCalls: detail.recentCalls.map(formatCall),
   });
@@ -134,6 +148,94 @@ export async function deleteCallLogs(req: AuthRequest, res: Response): Promise<v
     notFound: result.notFound,
     requested: serverIds.length,
   });
+}
+
+export async function updateCallLog(req: AuthRequest, res: Response): Promise<void> {
+  const serverId = String(req.params.serverId ?? '');
+
+  try {
+    const result = await callLogService.updateCallLog(serverId, req.body);
+    if (!result.updated) {
+      res.status(404).json({ error: 'Call log not found' });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Update failed';
+    if (message.includes('duplicate')) {
+      res.status(409).json({ error: message });
+      return;
+    }
+    throw err;
+  }
+}
+
+export async function updateContact(req: AuthRequest, res: Response): Promise<void> {
+  const phoneNumber = decodeURIComponent(String(req.params.phoneNumber ?? ''));
+  const { contactName } = req.body as { contactName: string };
+  const updated = await callLogService.updateContactName(phoneNumber, contactName);
+  res.json({ updated, phoneNumber });
+}
+
+export async function deleteContactCalls(req: AuthRequest, res: Response): Promise<void> {
+  const phoneNumber = decodeURIComponent(String(req.params.phoneNumber ?? ''));
+  const deleted = await callLogService.deleteCallsByPhone(phoneNumber);
+  res.json({ deleted, phoneNumber });
+}
+
+export async function deleteContactCallsBulk(req: AuthRequest, res: Response): Promise<void> {
+  const { phoneNumbers } = req.body as { phoneNumbers: string[] };
+  let deleted = 0;
+  for (const phoneNumber of phoneNumbers) {
+    deleted += await callLogService.deleteCallsByPhone(phoneNumber);
+  }
+  res.json({ deleted, requested: phoneNumbers.length });
+}
+
+export async function updateDevice(req: AuthRequest, res: Response): Promise<void> {
+  const deviceId = String(req.params.deviceId ?? '');
+  const updated = await callLogService.updateDevice(deviceId, req.body);
+  if (!updated) {
+    res.status(404).json({ error: 'Device not found' });
+    return;
+  }
+  res.json({ updated: true, deviceId });
+}
+
+export async function deleteDevice(req: AuthRequest, res: Response): Promise<void> {
+  const deviceId = String(req.params.deviceId ?? '');
+  const deleted = await callLogService.deleteDevice(deviceId);
+  if (!deleted) {
+    res.status(404).json({ error: 'Device not found' });
+    return;
+  }
+  res.json({ deleted: true, deviceId });
+}
+
+export async function deleteDevices(req: AuthRequest, res: Response): Promise<void> {
+  const { deviceIds } = req.body as { deviceIds: string[] };
+  const result = await callLogService.deleteManyDevices(deviceIds);
+  res.json({ deleted: result.deleted, notFound: result.notFound, requested: deviceIds.length });
+}
+
+export async function deleteSyncAuditEntries(req: AuthRequest, res: Response): Promise<void> {
+  const { ids } = req.body as { ids: number[] };
+  const result = await callLogService.deleteManySyncAudit(ids);
+  res.json({ deleted: result.deleted, requested: ids.length });
+}
+
+export async function deleteSyncAuditEntry(req: AuthRequest, res: Response): Promise<void> {
+  const id = parseInt(String(req.params.id ?? ''), 10);
+  if (Number.isNaN(id)) {
+    res.status(400).json({ error: 'Invalid audit id' });
+    return;
+  }
+  const deleted = await callLogService.deleteSyncAuditEntry(id);
+  if (!deleted) {
+    res.status(404).json({ error: 'Sync audit entry not found' });
+    return;
+  }
+  res.json({ deleted: true, id });
 }
 
 function formatCall(row: {

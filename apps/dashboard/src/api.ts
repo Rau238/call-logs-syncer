@@ -1,3 +1,5 @@
+import { normalizeTelemetry } from './utils/telemetry';
+
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
 
 export interface DashboardStats {
@@ -22,6 +24,11 @@ export interface LiveSnapshot {
   lastCallAt: number | null;
   activeDevices: number;
   syncBatchesLastHour: number;
+}
+
+export interface DataRevision {
+  revision: string;
+  changed: boolean;
 }
 
 export interface Analytics {
@@ -157,11 +164,15 @@ export async function fetchStats(token: string): Promise<DashboardStats> {
   return res.json();
 }
 
-export async function fetchLive(token: string): Promise<LiveSnapshot> {
-  const res = await fetch(`${API_BASE}/admin/dashboard/live`, {
+export async function fetchRevision(
+  token: string,
+  since?: string
+): Promise<DataRevision> {
+  const params = since ? `?since=${encodeURIComponent(since)}` : '';
+  const res = await fetch(`${API_BASE}/admin/dashboard/revision${params}`, {
     headers: authHeaders(token),
   });
-  if (!res.ok) throw new Error('Failed to load live snapshot');
+  if (!res.ok) throw new Error('Failed to check data revision');
   return res.json();
 }
 
@@ -217,7 +228,13 @@ export async function fetchDevices(
     headers: authHeaders(token),
   });
   if (!res.ok) throw new Error('Failed to load devices');
-  return res.json();
+  const data = await res.json();
+  return {
+    devices: (data.devices ?? []).map((d: DeviceRecord) => ({
+      ...d,
+      telemetry: normalizeTelemetry(d.telemetry),
+    })),
+  };
 }
 
 export async function fetchDeviceDetail(
@@ -228,7 +245,14 @@ export async function fetchDeviceDetail(
     headers: authHeaders(token),
   });
   if (!res.ok) throw new Error('Failed to load device detail');
-  return res.json();
+  const data = (await res.json()) as DeviceDetail;
+  return {
+    ...data,
+    device: {
+      ...data.device,
+      telemetry: normalizeTelemetry(data.device.telemetry),
+    },
+  };
 }
 
 export async function fetchSyncAudit(
@@ -243,7 +267,17 @@ export async function fetchSyncAudit(
     headers: authHeaders(token),
   });
   if (!res.ok) throw new Error('Failed to load sync audit');
-  return res.json();
+  const data = await res.json();
+  return {
+    ...data,
+    entries: (data.entries ?? []).map((e: SyncAuditEntry) => ({
+      ...e,
+      id: Number(e.id),
+      batchSize: Number(e.batchSize),
+      syncedCount: Number(e.syncedCount),
+      failedCount: Number(e.failedCount),
+    })),
+  };
 }
 
 export async function deleteCallLog(
@@ -273,6 +307,166 @@ export async function deleteCallLogs(
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || 'Failed to delete call logs');
+  }
+  return res.json();
+}
+
+export interface CallLogUpdate {
+  contactName?: string;
+  phoneNumber?: string;
+  callType?: string;
+  duration?: number;
+  callTime?: number;
+  simSlot?: number;
+  isDeleted?: boolean;
+}
+
+export async function updateCallLog(
+  token: string,
+  serverId: string,
+  patch: CallLogUpdate
+): Promise<{ updated: boolean; serverId: string }> {
+  const res = await fetch(`${API_BASE}/admin/call-logs/${serverId}`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to update call log');
+  }
+  return res.json();
+}
+
+export async function updateContact(
+  token: string,
+  phoneNumber: string,
+  contactName: string
+): Promise<{ updated: number; phoneNumber: string }> {
+  const res = await fetch(
+    `${API_BASE}/admin/contacts/${encodeURIComponent(phoneNumber)}`,
+    {
+      method: 'PATCH',
+      headers: authHeaders(token),
+      body: JSON.stringify({ contactName }),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to update contact');
+  }
+  return res.json();
+}
+
+export async function deleteCallsByPhone(
+  token: string,
+  phoneNumber: string
+): Promise<{ deleted: number; phoneNumber: string }> {
+  const res = await fetch(
+    `${API_BASE}/admin/contacts/${encodeURIComponent(phoneNumber)}/calls`,
+    {
+      method: 'DELETE',
+      headers: authHeaders(token),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to delete contact calls');
+  }
+  return res.json();
+}
+
+export async function updateDevice(
+  token: string,
+  deviceId: string,
+  patch: { deviceName?: string; isActive?: boolean }
+): Promise<{ updated: boolean; deviceId: string }> {
+  const res = await fetch(`${API_BASE}/admin/devices/${encodeURIComponent(deviceId)}`, {
+    method: 'PATCH',
+    headers: authHeaders(token),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to update device');
+  }
+  return res.json();
+}
+
+export async function deleteDevice(
+  token: string,
+  deviceId: string
+): Promise<{ deleted: boolean; deviceId: string }> {
+  const res = await fetch(`${API_BASE}/admin/devices/${encodeURIComponent(deviceId)}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to delete device');
+  }
+  return res.json();
+}
+
+export async function deleteDevices(
+  token: string,
+  deviceIds: string[]
+): Promise<{ deleted: number; notFound: string[]; requested: number }> {
+  const res = await fetch(`${API_BASE}/admin/devices/delete`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ deviceIds }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to delete devices');
+  }
+  return res.json();
+}
+
+export async function deleteContactCallsBulk(
+  token: string,
+  phoneNumbers: string[]
+): Promise<{ deleted: number; requested: number }> {
+  const res = await fetch(`${API_BASE}/admin/contacts/delete-calls`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ phoneNumbers }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to delete contact calls');
+  }
+  return res.json();
+}
+
+export async function deleteSyncAuditEntries(
+  token: string,
+  ids: number[]
+): Promise<{ deleted: number; requested: number }> {
+  const res = await fetch(`${API_BASE}/admin/sync-audit/delete`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({ ids: ids.map((id) => Number(id)) }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to delete sync audit entries');
+  }
+  return res.json();
+}
+
+export async function deleteSyncAuditEntry(
+  token: string,
+  id: number
+): Promise<{ deleted: boolean; id: number }> {
+  const res = await fetch(`${API_BASE}/admin/sync-audit/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(token),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || 'Failed to delete sync audit entry');
   }
   return res.json();
 }

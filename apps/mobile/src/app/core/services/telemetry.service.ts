@@ -6,7 +6,7 @@ import { CallLogSync } from 'call-log-sync';
 import { ApiService } from './api.service';
 import { AuthService } from './auth.service';
 import { NetworkMonitorService } from './network-monitor.service';
-import { SyncService } from './sync.service';
+import { SqliteService } from './sqlite.service';
 
 /**
  * Uploads device permissions, plugin status, and SQLite debug info to the server
@@ -17,12 +17,12 @@ import { SyncService } from './sync.service';
 })
 export class TelemetryService {
   private lastUploadAt = 0;
-  private static readonly MIN_INTERVAL_MS = 15_000;
+  private static readonly MIN_INTERVAL_MS = 5_000;
 
   constructor(
     private api: ApiService,
     private auth: AuthService,
-    private sync: SyncService,
+    private sqlite: SqliteService,
     private network: NetworkMonitorService
   ) {}
 
@@ -35,7 +35,11 @@ export class TelemetryService {
     const token = this.auth.getAccessToken();
     const apiKey = this.auth.getApiKey();
     const deviceId = this.auth.getDeviceId();
-    if (!token || !apiKey || !deviceId || !this.network.isConnected()) {
+    if (!token || !apiKey || !deviceId) {
+      console.warn('[Telemetry] skipped — missing auth or deviceId');
+      return;
+    }
+    if (!force && !this.network.isConnected()) {
       return;
     }
 
@@ -43,7 +47,7 @@ export class TelemetryService {
       const [permissions, pluginStatus, sqliteDebug, appInfo] = await Promise.all([
         CallLogSync.checkPermissions(),
         CallLogSync.getPluginStatus(),
-        this.sync.getDebugInfo(),
+        this.sqlite.getDebugInfo(),
         App.getInfo().catch(() => ({ version: 'unknown', build: '' })),
       ]);
 
@@ -58,6 +62,8 @@ export class TelemetryService {
           failed: sqliteDebug.failed,
           total: sqliteDebug.total,
         },
+        authStatus: 'Token + API key OK',
+        apiUrl: this.api.getApiUrl(),
         appVersion: appInfo.version,
         osVersion: Capacitor.getPlatform() === 'android' ? `Android` : Capacitor.getPlatform(),
         networkConnected: this.network.isConnected(),
@@ -66,8 +72,10 @@ export class TelemetryService {
       });
 
       this.lastUploadAt = now;
+      console.info('[Telemetry] uploaded to server');
     } catch (err) {
       console.warn('[Telemetry] upload failed', err);
+      throw err;
     }
   }
 }

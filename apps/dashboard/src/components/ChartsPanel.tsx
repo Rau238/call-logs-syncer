@@ -14,6 +14,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { Analytics } from '../api';
+import { RowActions } from './RowActions';
 import { callTypeLabel, formatDuration } from '../utils/format';
 
 const TYPE_COLORS: Record<string, string> = {
@@ -28,9 +29,17 @@ const TYPE_COLORS: Record<string, string> = {
 
 interface Props {
   analytics: Analytics | null;
+  onEditContact?: (contact: Analytics['topNumbers'][0]) => void;
+  onDeleteContact?: (contact: Analytics['topNumbers'][0]) => void;
+  actionDisabled?: boolean;
 }
 
-export function ChartsPanel({ analytics }: Props) {
+export function ChartsPanel({
+  analytics,
+  onEditContact,
+  onDeleteContact,
+  actionDisabled,
+}: Props) {
   if (!analytics) return null;
 
   const typeData = analytics.callsByType.map((t) => ({
@@ -166,6 +175,14 @@ export function ChartsPanel({ analytics }: Props) {
                 <span className="pill muted">{formatDuration(n.totalDuration)}</span>
                 {n.deletedCount > 0 && (
                   <span className="pill danger">{n.deletedCount} deleted</span>
+                )}
+                {(onEditContact || onDeleteContact) && (
+                  <RowActions
+                    onEdit={onEditContact ? () => onEditContact(n) : undefined}
+                    onDelete={onDeleteContact ? () => onDeleteContact(n) : undefined}
+                    disabled={actionDisabled}
+                    compact
+                  />
                 )}
               </div>
             </div>

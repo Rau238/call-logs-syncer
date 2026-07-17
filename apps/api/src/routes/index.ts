@@ -14,6 +14,12 @@ import {
   syncCallSchema,
   batchSyncSchema,
   deleteCallLogsSchema,
+  updateCallLogSchema,
+  updateContactSchema,
+  updateDeviceSchema,
+  deleteDevicesSchema,
+  deleteSyncAuditSchema,
+  deleteContactCallsBulkSchema,
   deviceTelemetrySchema,
 } from '../middleware/validation';
 
@@ -81,6 +87,13 @@ router.get(
 );
 
 router.get(
+  '/admin/dashboard/revision',
+  authMiddleware,
+  adminMiddleware,
+  adminController.getDataRevision
+);
+
+router.get(
   '/admin/call-logs',
   authMiddleware,
   adminMiddleware,
@@ -102,6 +115,37 @@ router.post(
   adminController.deleteCallLogs
 );
 
+router.patch(
+  '/admin/call-logs/:serverId',
+  authMiddleware,
+  adminMiddleware,
+  (req, res, next) => validateBody(updateCallLogSchema, req, res, next),
+  adminController.updateCallLog
+);
+
+router.patch(
+  '/admin/contacts/:phoneNumber',
+  authMiddleware,
+  adminMiddleware,
+  (req, res, next) => validateBody(updateContactSchema, req, res, next),
+  adminController.updateContact
+);
+
+router.delete(
+  '/admin/contacts/:phoneNumber/calls',
+  authMiddleware,
+  adminMiddleware,
+  adminController.deleteContactCalls
+);
+
+router.post(
+  '/admin/contacts/delete-calls',
+  authMiddleware,
+  adminMiddleware,
+  (req, res, next) => validateBody(deleteContactCallsBulkSchema, req, res, next),
+  adminController.deleteContactCallsBulk
+);
+
 router.get(
   '/admin/contacts',
   authMiddleware,
@@ -121,6 +165,44 @@ router.get(
   authMiddleware,
   adminMiddleware,
   adminController.getDeviceDetail
+);
+
+router.patch(
+  '/admin/devices/:deviceId',
+  authMiddleware,
+  adminMiddleware,
+  (req, res, next) => validateBody(updateDeviceSchema, req, res, next),
+  adminController.updateDevice
+);
+
+router.delete(
+  '/admin/devices/:deviceId',
+  authMiddleware,
+  adminMiddleware,
+  adminController.deleteDevice
+);
+
+router.post(
+  '/admin/devices/delete',
+  authMiddleware,
+  adminMiddleware,
+  (req, res, next) => validateBody(deleteDevicesSchema, req, res, next),
+  adminController.deleteDevices
+);
+
+router.delete(
+  '/admin/sync-audit/:id',
+  authMiddleware,
+  adminMiddleware,
+  adminController.deleteSyncAuditEntry
+);
+
+router.post(
+  '/admin/sync-audit/delete',
+  authMiddleware,
+  adminMiddleware,
+  (req, res, next) => validateBody(deleteSyncAuditSchema, req, res, next),
+  adminController.deleteSyncAuditEntries
 );
 
 router.get(

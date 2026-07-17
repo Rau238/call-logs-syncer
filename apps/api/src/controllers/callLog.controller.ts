@@ -89,7 +89,11 @@ export async function reportTelemetry(req: AuthRequest, res: Response): Promise<
     return;
   }
 
-  await callLogService.saveDeviceTelemetry(deviceId, telemetry);
+  const saved = await callLogService.saveDeviceTelemetry(deviceId, telemetry);
+  if (!saved) {
+    res.status(404).json({ error: 'Device not found' });
+    return;
+  }
   res.json({ saved: true, deviceId });
 }
 

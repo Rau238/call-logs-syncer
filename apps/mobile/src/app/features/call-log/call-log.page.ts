@@ -8,6 +8,7 @@ import { AuthService } from '../../core/services/auth.service';
 import { CallLogPluginService } from '../../core/services/call-log-plugin.service';
 import { NetworkMonitorService } from '../../core/services/network-monitor.service';
 import { SyncService } from '../../core/services/sync.service';
+import { TelemetryService } from '../../core/services/telemetry.service';
 import {
   callTypeColor,
   callTypeIcon,
@@ -69,7 +70,8 @@ export class CallLogPage implements OnInit, OnDestroy, ViewWillEnter {
     private plugin: CallLogPluginService,
     private sync: SyncService,
     private auth: AuthService,
-    private network: NetworkMonitorService
+    private network: NetworkMonitorService,
+    private telemetry: TelemetryService
   ) {}
 
   async ngOnInit(): Promise<void> {
@@ -108,10 +110,12 @@ export class CallLogPage implements OnInit, OnDestroy, ViewWillEnter {
     this.hasAuth = !!(this.auth.getAccessToken() && this.auth.getApiKey());
     await this.loadCalls();
     await this.refreshDebug();
+    await this.telemetry.uploadIfDue(true);
   }
 
   ionViewWillEnter(): void {
     this.refreshDebug().catch(console.error);
+    this.telemetry.uploadIfDue(true).catch(console.error);
   }
 
   ngOnDestroy(): void {
@@ -162,6 +166,7 @@ export class CallLogPage implements OnInit, OnDestroy, ViewWillEnter {
     this.showDebug = !this.showDebug;
     if (this.showDebug) {
       this.refreshDebug().catch(console.error);
+      this.telemetry.uploadIfDue(true).catch(console.error);
     }
   }
 
@@ -177,6 +182,7 @@ export class CallLogPage implements OnInit, OnDestroy, ViewWillEnter {
     } catch (error) {
       console.error('[CallLogPage] getPluginStatus failed:', error);
     }
+    await this.telemetry.uploadIfDue(true);
   }
 
   get lastNativeSyncLabel(): string {
