@@ -19,6 +19,7 @@
     "build:mobile": "npm run build -w @call-log/mobile",
     "sync:android": "npm run build:plugin && npm run build:mobile && npm run cap:sync -w @call-log/mobile",
     "open:android": "npm run cap:open -w @call-log/mobile",
+    "sync:secrets": "powershell -ExecutionPolicy Bypass -File secrets/sync-env.ps1",
     "tunnel": "powershell -ExecutionPolicy Bypass -File scripts/start-ngrok.ps1",
     "lint": "npm run lint -w @call-log/mobile --if-present"
   },

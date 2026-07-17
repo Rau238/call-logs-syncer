@@ -14,6 +14,7 @@ call-log-sync-system/
 │   └── plugin/                 # Capacitor Kotlin plugin
 ├── infrastructure/
 │   └── postgres/migrations/    # Database schema SQL
+├── secrets/                      # Env files + sync scripts (api, ngrok, mobile)
 ├── scripts/setup.js              # One-command project setup
 └── docs/                         # Guides
 ```
@@ -32,15 +33,23 @@ npm run setup
 
 **[docs/SETUP-POSTGRES-PGADMIN.md](docs/SETUP-POSTGRES-PGADMIN.md)**
 
-### 3. Configure database credentials
+### 3. Configure environment (secrets folder)
 
-Edit `apps/api/.env`:
+**Option A — sync from tracked secrets (recommended after clone):**
+
+```powershell
+.\secrets\sync-env.ps1
+```
+
+**Option B — manual:** edit `apps/api/.env`:
 
 ```env
 DB_USER=postgres
 DB_PASSWORD=your_pgadmin_password
 DB_NAME=call_log_sync
 ```
+
+All env templates and live values for this project live in **`secrets/`** (see `secrets/README.md`).
 
 ### 4. Create tables
 

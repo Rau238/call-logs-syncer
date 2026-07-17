@@ -27,11 +27,22 @@ function main() {
   run('npm install');
 
   const envExample = path.join(root, 'apps', 'api', '.env.example');
+  const secretsApiEnv = path.join(root, 'secrets', 'api.env');
   const envTarget = path.join(root, 'apps', 'api', '.env');
-  if (!fs.existsSync(envTarget) && fs.existsSync(envExample)) {
+  if (!fs.existsSync(envTarget) && fs.existsSync(secretsApiEnv)) {
+    fs.copyFileSync(secretsApiEnv, envTarget);
+    console.log('\nCreated apps/api/.env from secrets/api.env');
+  } else if (!fs.existsSync(envTarget) && fs.existsSync(envExample)) {
     fs.copyFileSync(envExample, envTarget);
     console.log('\nCreated apps/api/.env from .env.example');
     console.log('Edit apps/api/.env with your PostgreSQL credentials from pgAdmin 4.');
+  }
+
+  const secretsNgrok = path.join(root, 'secrets', 'ngrok.env');
+  const ngrokTarget = path.join(root, '.env.ngrok');
+  if (!fs.existsSync(ngrokTarget) && fs.existsSync(secretsNgrok)) {
+    fs.copyFileSync(secretsNgrok, ngrokTarget);
+    console.log('Created .env.ngrok from secrets/ngrok.env');
   }
 
   run('npm run build -w @call-log/plugin');
@@ -40,7 +51,7 @@ function main() {
   console.log('\n=== Setup Complete ===\n');
   console.log('NEXT STEPS:');
   console.log('  1. Set up PostgreSQL in pgAdmin 4 (see docs/SETUP-POSTGRES-PGADMIN.md)');
-  console.log('  2. Update apps/api/.env with your DB credentials');
+  console.log('  2. Or sync env:       npm run sync:secrets');
   console.log('  3. Run migrations:  npm run db:migrate');
   console.log('  4. Start dev:        npm run dev');
   console.log('');
