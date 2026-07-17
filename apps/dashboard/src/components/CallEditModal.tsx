@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { CallLogRecord, CallLogUpdate } from '../api';
 import { callTypeLabel } from '../utils/format';
+import { Button, inputClassName, labelClassName, selectClassName } from './ui/Button';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 
 const CALL_TYPES = [
   'INCOMING',
@@ -61,57 +63,85 @@ export function CallEditModal({ call, saving, onClose, onSave }: Props) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <form className="modal-card" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
-        <h2>Edit call log</h2>
-        <p className="modal-sub mono">{call.serverId}</p>
-
-        <label>
-          Contact name
-          <input value={contactName} onChange={(e) => setContactName(e.target.value)} />
-        </label>
-        <label>
-          Phone number
-          <input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} />
-        </label>
-        <label>
-          Call type
-          <select value={callType} onChange={(e) => setCallType(e.target.value)}>
-            {CALL_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {callTypeLabel(t)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="modal-row">
-          <label>
-            Duration (sec)
-            <input type="number" min={0} value={duration} onChange={(e) => setDuration(e.target.value)} />
+    <Modal onClose={onClose} size="md">
+      <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+        <ModalHeader
+          title="Edit call log"
+          subtitle={<span className="font-mono text-[11px] sm:text-xs">{call.serverId}</span>}
+        />
+        <ModalBody>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className={labelClassName}>
+              Contact name
+              <input className={inputClassName} value={contactName} onChange={(e) => setContactName(e.target.value)} />
+            </label>
+            <label className={labelClassName}>
+              Phone number
+              <input className={inputClassName} value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} />
+            </label>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className={labelClassName}>
+              Call type
+              <select className={selectClassName} value={callType} onChange={(e) => setCallType(e.target.value)}>
+                {CALL_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {callTypeLabel(t)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={labelClassName}>
+              Call time
+              <input
+                type="datetime-local"
+                className={inputClassName}
+                value={callTimeLocal}
+                onChange={(e) => setCallTimeLocal(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className={labelClassName}>
+              Duration (sec)
+              <input
+                type="number"
+                min={0}
+                className={inputClassName}
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+              />
+            </label>
+            <label className={labelClassName}>
+              SIM slot
+              <input
+                type="number"
+                min={0}
+                className={inputClassName}
+                value={simSlot}
+                onChange={(e) => setSimSlot(e.target.value)}
+              />
+            </label>
+          </div>
+          <label className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2 text-xs text-slate-300 sm:text-sm">
+            <input
+              type="checkbox"
+              className="rounded border-slate-600"
+              checked={isDeleted}
+              onChange={(e) => setIsDeleted(e.target.checked)}
+            />
+            Mark as deleted from phone
           </label>
-          <label>
-            SIM slot
-            <input type="number" min={0} value={simSlot} onChange={(e) => setSimSlot(e.target.value)} />
-          </label>
-        </div>
-        <label>
-          Call time
-          <input type="datetime-local" value={callTimeLocal} onChange={(e) => setCallTimeLocal(e.target.value)} />
-        </label>
-        <label className="checkbox-label">
-          <input type="checkbox" checked={isDeleted} onChange={(e) => setIsDeleted(e.target.checked)} />
-          Mark as deleted from phone
-        </label>
-
-        <div className="modal-actions">
-          <button type="button" className="btn-outline" onClick={onClose} disabled={saving}>
+        </ModalBody>
+        <ModalFooter>
+          <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={saving} className="w-full sm:w-auto">
             Cancel
-          </button>
-          <button type="submit" className="btn-primary" disabled={saving}>
-            {saving ? 'Saving...' : 'Save changes'}
-          </button>
-        </div>
+          </Button>
+          <Button type="submit" variant="primary" size="sm" disabled={saving} className="w-full sm:w-auto">
+            {saving ? 'Saving…' : 'Save changes'}
+          </Button>
+        </ModalFooter>
       </form>
-    </div>
+    </Modal>
   );
 }

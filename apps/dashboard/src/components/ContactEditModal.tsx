@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { ContactGroup } from '../api';
 import { formatPhoneNumber } from '../utils/format';
+import { Button, inputClassName, labelClassName } from './ui/Button';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from './ui/Modal';
 
 interface Props {
   contact: ContactGroup;
@@ -22,26 +24,40 @@ export function ContactEditModal({ contact, saving, onClose, onSave }: Props) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <form className="modal-card" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
-        <h2>Edit contact</h2>
-        <p className="modal-sub mono">{formatPhoneNumber(contact.phoneNumber)}</p>
-        <p className="modal-hint">Updates the contact name on all {contact.callCount} call log(s) for this number.</p>
-
-        <label>
-          Contact name
-          <input value={contactName} onChange={(e) => setContactName(e.target.value)} required />
-        </label>
-
-        <div className="modal-actions">
-          <button type="button" className="btn-outline" onClick={onClose} disabled={saving}>
+    <Modal onClose={onClose} size="sm">
+      <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+        <ModalHeader
+          title="Edit contact"
+          subtitle={
+            <>
+              <span className="font-mono">{formatPhoneNumber(contact.phoneNumber)}</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500 sm:text-xs">
+                Updates the name on all {contact.callCount} call log(s) for this number.
+              </span>
+            </>
+          }
+        />
+        <ModalBody>
+          <label className={labelClassName}>
+            Contact name
+            <input
+              className={inputClassName}
+              value={contactName}
+              onChange={(e) => setContactName(e.target.value)}
+              required
+              autoFocus
+            />
+          </label>
+        </ModalBody>
+        <ModalFooter>
+          <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={saving} className="w-full sm:w-auto">
             Cancel
-          </button>
-          <button type="submit" className="btn-primary" disabled={saving}>
-            {saving ? 'Saving...' : 'Save changes'}
-          </button>
-        </div>
+          </Button>
+          <Button type="submit" variant="primary" size="sm" disabled={saving} className="w-full sm:w-auto">
+            {saving ? 'Saving…' : 'Save changes'}
+          </Button>
+        </ModalFooter>
       </form>
-    </div>
+    </Modal>
   );
 }
