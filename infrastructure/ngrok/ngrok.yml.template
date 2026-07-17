@@ -1,0 +1,3 @@
+version: "2"
+authtoken: REPLACE_WITH_TOKEN
+tunnels: {}

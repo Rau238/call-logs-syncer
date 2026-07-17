@@ -1,0 +1,63 @@
+{
+  "name": "@call-log/plugin",
+  "version": "0.1.0",
+  "description": "Production-ready Android Call Log synchronization Capacitor plugin",
+  "main": "dist/plugin.cjs.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "unpkg": "dist/plugin.js",
+  "files": [
+    "android/src/main/",
+    "android/build.gradle",
+    "dist/",
+    "ios/Sources",
+    "ios/Tests",
+    "Package.swift",
+    "CallLogSync.podspec"
+  ],
+  "author": "Enterprise Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/enterprise/call-log-sync"
+  },
+  "bugs": {
+    "url": "https://github.com/enterprise/call-log-sync/issues"
+  },
+  "keywords": [
+    "capacitor",
+    "plugin",
+    "native",
+    "android",
+    "call-log",
+    "sync"
+  ],
+  "scripts": {
+    "verify": "npm run build",
+    "build": "npm run clean && tsc && rollup -c rollup.config.mjs",
+    "clean": "rimraf ./dist",
+    "watch": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/docgen": "^0.3.1",
+    "@capacitor/ios": "^8.4.1",
+    "rimraf": "^6.0.1",
+    "rollup": "^4.30.1",
+    "@rollup/plugin-node-resolve": "^16.0.0",
+    "typescript": "~5.9.0"
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  }
+}

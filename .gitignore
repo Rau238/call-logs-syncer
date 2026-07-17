@@ -1,0 +1,21 @@
+node_modules/
+dist/
+www/
+.angular/
+*.log
+.env
+.env.local
+.env.ngrok
+infrastructure/ngrok/ngrok.yml
+.DS_Store
+Thumbs.db
+
+# Android build output
+apps/mobile/android/.gradle/
+apps/mobile/android/app/build/
+apps/mobile/android/build/
+packages/plugin/android/build/
+
+# IDE
+.idea/
+*.iml

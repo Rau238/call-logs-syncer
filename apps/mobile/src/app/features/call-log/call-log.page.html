@@ -1,0 +1,147 @@
+<ion-header [translucent]="true">
+  <ion-toolbar color="primary">
+    <ion-title>Call Log Sync</ion-title>
+    <ion-buttons slot="end">
+      <ion-button (click)="manualSync()" [disabled]="isSyncing">
+        <ion-icon slot="icon-only" name="cloud-upload-outline"></ion-icon>
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <ion-refresher slot="fixed" (ionRefresh)="handleRefresh($event)">
+    <ion-refresher-content></ion-refresher-content>
+  </ion-refresher>
+
+  <!-- Status banner -->
+  <div class="status-banner" [class.offline]="!isOnline" [class.syncing]="isSyncing">
+    <div class="status-row">
+      <ion-icon [name]="isOnline ? 'wifi' : 'cloud-offline'" class="status-icon"></ion-icon>
+      <div class="status-text">
+        <strong>{{ syncStatusText }}</strong>
+        <span *ngIf="observerActive"> · Real-time monitor active</span>
+        <span *ngIf="!observerActive && hasCallLogPermission"> · Observer inactive</span>
+        <span *ngIf="!hasCallLogPermission"> · Permission required</span>
+      </div>
+      <ion-spinner *ngIf="isSyncing" name="crescent" class="status-spinner"></ion-spinner>
+    </div>
+    <div class="status-meta">
+      Last sync: {{ lastSyncLabel }} · Device: {{ deviceId | slice:0:12 }}...
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-chip">
+      <span class="stat-num">{{ totalCount }}</span>
+      <span class="stat-lbl">Stored</span>
+    </div>
+    <div class="stat-chip warning">
+      <span class="stat-num">{{ pendingCount }}</span>
+      <span class="stat-lbl">Pending</span>
+    </div>
+    <div class="stat-chip success">
+      <span class="stat-num">{{ syncedCount }}</span>
+      <span class="stat-lbl">Synced</span>
+    </div>
+  </div>
+
+  <!-- Permission prompt -->
+  <ion-card *ngIf="!hasCallLogPermission" class="permission-card">
+    <ion-card-content>
+      <ion-icon name="shield-checkmark-outline" color="warning"></ion-icon>
+      <h3>Call Log Permission Required</h3>
+      <p>Grant access to read call logs for automatic background sync.</p>
+      <ion-button expand="block" color="primary" (click)="requestPermissions()">
+        Grant Permission
+      </ion-button>
+    </ion-card-content>
+  </ion-card>
+
+  <ion-note *ngIf="lastError" color="danger" class="error-banner">
+    {{ lastError }}
+  </ion-note>
+
+  <!-- Debug panel (tap stats row to toggle) -->
+  <div class="debug-toggle" (click)="toggleDebug()">
+    <ion-icon name="bug-outline"></ion-icon>
+    Debug info {{ showDebug ? '(hide)' : '(show)' }}
+  </div>
+  <ion-card *ngIf="showDebug" class="debug-card">
+    <ion-card-content>
+      <p><strong>SQLite:</strong> {{ debugInfo?.ready ? 'Ready' : 'Not initialized' }}</p>
+      <p><strong>Platform:</strong> {{ debugInfo?.native ? 'Native Android' : 'Web (no SQLite)' }}</p>
+      <p><strong>Auth:</strong> {{ hasAuth ? 'Token + API key OK' : 'Missing — re-register device' }}</p>
+      <p><strong>API:</strong> {{ apiUrl }}</p>
+      <p><strong>Stored / Pending / Synced / Failed:</strong>
+        {{ debugInfo?.total ?? 0 }} / {{ debugInfo?.pending ?? 0 }} /
+        {{ debugInfo?.synced ?? 0 }} / {{ debugInfo?.failed ?? 0 }}
+      </p>
+      <p><strong>Call log observer:</strong> {{ pluginStatus?.observerActive ? 'Active' : 'Inactive' }}</p>
+      <p><strong>Contacts observer:</strong> {{ pluginStatus?.contactsObserverActive ? 'Active' : 'Inactive' }}</p>
+      <p><strong>Tracked calls (native):</strong> {{ pluginStatus?.trackedCallsCount ?? 0 }}</p>
+      <p><strong>Background sync:</strong>
+        {{ pluginStatus?.backgroundSyncConfigured ? 'Configured' : 'Not configured' }}
+        <span *ngIf="pluginStatus?.backgroundSyncPending"> · Pending flag set</span>
+      </p>
+      <p><strong>Last native sync:</strong> {{ lastNativeSyncLabel }}</p>
+      <p><strong>Permissions:</strong>
+        Call log {{ hasCallLogPermission ? '✓' : '✗' }},
+        Contacts {{ hasContactsPermission ? '✓' : '✗' }},
+        Phone {{ pluginStatus?.permissions?.readPhoneState ? '✓' : '✗' }}
+      </p>
+      <p><strong>Device ID:</strong> {{ deviceId }}</p>
+      <ion-button size="small" fill="outline" (click)="refreshDebug()">Refresh</ion-button>
+      <ion-button size="small" fill="outline" (click)="manualSync()">Force sync</ion-button>
+      <ion-button size="small" fill="outline" (click)="requestPermissions()">Fix permissions</ion-button>
+      <ion-button size="small" color="warning" fill="outline" (click)="reRegisterDevice()">
+        Re-register device
+      </ion-button>
+    </ion-card-content>
+  </ion-card>
+
+  <!-- Call list grouped by date -->
+  <ng-container *ngIf="groupedCalls.length > 0">
+    <div *ngFor="let group of groupedCalls" class="call-group">
+      <div class="group-header">{{ group.label }}</div>
+
+      <ion-list lines="none" class="call-list">
+        <ion-item *ngFor="let call of group.calls" class="call-item" [class.deleted]="call.isDeleted" lines="full">
+          <div class="call-avatar" slot="start" [attr.data-type]="call.callType">
+            <ion-icon [name]="callTypeIcon(call.callType)" [color]="callTypeColor(call.callType)"></ion-icon>
+          </div>
+
+          <ion-label>
+            <div class="call-primary">
+              <h2>{{ call.contactName || call.phoneNumber || 'Unknown' }}</h2>
+              <ion-badge [color]="call.isDeleted ? 'danger' : statusColor(call.syncStatus)">
+                {{ call.isDeleted ? 'DELETED' : call.syncStatus }}
+              </ion-badge>
+            </div>
+            <p class="call-number" *ngIf="call.contactName">{{ call.phoneNumber }}</p>
+            <p class="call-meta">
+              <span class="call-type">{{ callTypeLabel(call.callType) }}</span>
+              <span class="dot">·</span>
+              <span>{{ formatDuration(call.duration) }}</span>
+              <span class="dot" *ngIf="call.simSlot >= 0">·</span>
+              <span *ngIf="call.simSlot >= 0">SIM {{ call.simSlot + 1 }}</span>
+            </p>
+            <p class="call-time">{{ formatCallDateTime(call.callTime) }}</p>
+          </ion-label>
+        </ion-item>
+      </ion-list>
+    </div>
+  </ng-container>
+
+  <div *ngIf="groupedCalls.length === 0 && !isLoading" class="empty-state">
+    <ion-icon name="call-outline"></ion-icon>
+    <h3>No call logs yet</h3>
+    <p>Calls are captured automatically in the background and synced when online.</p>
+    <ion-button fill="outline" (click)="manualSync()" [disabled]="isSyncing">
+      Sync Now
+    </ion-button>
+  </div>
+
+  <ion-spinner *ngIf="isLoading" name="crescent" class="center-spinner"></ion-spinner>
+</ion-content>

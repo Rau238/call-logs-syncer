@@ -1,0 +1,7 @@
+{
+  "name": "call-log-app",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular"
+}

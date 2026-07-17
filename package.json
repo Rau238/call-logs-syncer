@@ -1,0 +1,31 @@
+{
+  "name": "call-log-sync-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enterprise Android Call Log Sync — Monorepo",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "dev": "npm run build -w @call-log/dashboard && npm run dev -w @call-log/api",
+    "dev:split": "concurrently -n api,dashboard -c blue,magenta \"npm run dev -w @call-log/api\" \"npm run dev -w @call-log/dashboard\"",
+    "start": "npm run build -w @call-log/dashboard && npm run build -w @call-log/api && npm run start -w @call-log/api",
+    "db:migrate": "npm run migrate -w @call-log/api",
+    "db:seed-admin": "npm run seed:admin -w @call-log/api",
+    "build": "npm run build -w @call-log/plugin && npm run build -w @call-log/api && npm run build -w @call-log/mobile && npm run build -w @call-log/dashboard",
+    "build:plugin": "npm run build -w @call-log/plugin",
+    "build:mobile": "npm run build -w @call-log/mobile",
+    "sync:android": "npm run build:plugin && npm run build:mobile && npm run cap:sync -w @call-log/mobile",
+    "open:android": "npm run cap:open -w @call-log/mobile",
+    "tunnel": "powershell -ExecutionPolicy Bypass -File scripts/start-ngrok.ps1",
+    "lint": "npm run lint -w @call-log/mobile --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
